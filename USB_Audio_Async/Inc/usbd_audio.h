@@ -1,5 +1,14 @@
 /**
+   ******************************************************************************
+  * @file    usbd_audio.h
+  * @author  JMF
+  * @version V1.0
+  * @date    27-09-2016
+  * @brief   header file for the usbd_audio.c file.
   ******************************************************************************
+  ******************************************************************************
+  * 
+  * Based on:
   * @file    usbd_audio.h
   * @author  MCD Application Team
   * @version V2.4.2
@@ -50,8 +59,8 @@
   * @{
   */ 
 #define AUDIO_OUT_EP                                  0x01
-#define AUDIO_IN_EP                     			  0x81  // ## added for the feedback endpoint
-#define USB_AUDIO_CONFIG_DESC_SIZ                     118	// ## added 9 bytes for the feedback end point
+#define AUDIO_IN_EP                     	      0x81  // feedback endpoint
+#define USB_AUDIO_CONFIG_DESC_SIZ                     118   // added 9 bytes for the feedback end point
 #define AUDIO_INTERFACE_DESC_SIZE                     9
 #define USB_AUDIO_DESC_SIZ                            0x09
 #define AUDIO_STANDARD_ENDPOINT_DESC_SIZE             0x09

@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    usbd_audio.c
   * @author  JM. Fourneropn
-  * @version V1.1
+  * @version V1.2
   * @date    28/09/2016
   * @brief   This file provides the Audio core functions with explicit Audio feedback.
   *
