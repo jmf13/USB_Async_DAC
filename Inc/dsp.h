@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 
-void dsp(int16_t* buffer, int length, uint8_t channel);
+void dsp(int16_t* buffer_input, int16_t* buffer_outputA, int16_t* buffer_outputB, uint8_t channel);
 void initFilter(void);
 
 #endif

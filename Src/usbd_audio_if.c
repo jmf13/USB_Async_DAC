@@ -92,8 +92,11 @@ USBD_AUDIO_ItfTypeDef USBD_AUDIO_fops = {
 
 /* Exported variables --------------------------------------------------------*/
 int16_t Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE * 2];  // This represents two buffers in ping pong arrangement stereo samples
-int16_t Audio_buffer_L[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Left channel
-int16_t Audio_buffer_R[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Right channel
+int16_t Audio_buffer_1[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Channel 1
+int16_t Audio_buffer_2[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Channel 2
+int16_t Audio_buffer_3[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Channel 3
+int16_t Audio_buffer_4[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Channel 4
+
 int16_t Audio_input_ring_buffer[AUDIO_INPUT_BUFF_SIZE]; // We want to work between 1/3 and 2/3 buffer, pulling AUDIO_OUTPUT_BUFF_SIZE at a time
 
 //volatile static uint16_t old_gap = AUDIO_INPUT_BUFF_SIZE;
@@ -299,8 +302,8 @@ void fill_buffer (int buffer) // buffer=0 for first half of the buffer buffer = 
 	// Asynch feature
 	//if (Audio_input_ring_buffer_length > AUDIO_OUTPUT_BUFF_SIZE){
 		for(i=0; i<AUDIO_OUTPUT_BUFF_SIZE/2; i++){
-			Audio_buffer_L[i]= Audio_input_ring_buffer[Audio_input_ring_buffer_start];
-			Audio_buffer_R[i]= Audio_input_ring_buffer[Audio_input_ring_buffer_start+1];
+			Audio_buffer_1[i]= Audio_input_ring_buffer[Audio_input_ring_buffer_start];
+			Audio_buffer_3[i]= Audio_input_ring_buffer[Audio_input_ring_buffer_start+1];
 
 			// move the read pointer of Audio_Input_ring_buffer
 			Audio_input_ring_buffer_start = (Audio_input_ring_buffer_start + 2 >= AUDIO_INPUT_BUFF_SIZE) ? 0 : Audio_input_ring_buffer_start + 2;
@@ -309,19 +312,19 @@ void fill_buffer (int buffer) // buffer=0 for first half of the buffer buffer = 
 
 		//if user button pressed, we apply the DSP
 		//## add the init of the pushbutton
-		if (BSP_PB_GetState(BUTTON_KEY)== 1) {
-				BSP_LED_On(LED3);
-				dsp((int16_t*)&Audio_buffer_L[0], AUDIO_OUTPUT_BUFF_SIZE/2, 0);
-				dsp((int16_t*)&Audio_buffer_R[0], AUDIO_OUTPUT_BUFF_SIZE/2, 1);
-		} else {
-			BSP_LED_Off(LED3);
-		}
+		//if (BSP_PB_GetState(BUTTON_KEY)== 1) {
+		//		BSP_LED_On(LED3);
+				dsp((int16_t*)&Audio_buffer_1[0], (int16_t*)&Audio_buffer_1[0], (int16_t*)&Audio_buffer_2[0], 0);
+				dsp((int16_t*)&Audio_buffer_3[0], (int16_t*)&Audio_buffer_3[0], (int16_t*)&Audio_buffer_4[0], 1);
+		//} else {
+		//	BSP_LED_Off(LED3);
+		//}
 
 		// Build stereo Audio_output_buffer from Audio_buffer_L and Audio_buffer_R, filling the requested
 		// ping pong buffer: first half offset 0 or second half offset AUDIO_OUTPUT_BUFF_SIZE
 		for(i=0; i<AUDIO_OUTPUT_BUFF_SIZE/2; i++){
-			 Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE*buffer+2*i]= Audio_buffer_L[i]; /*Left Channel*/
-			 Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE*buffer+2*i + 1]= Audio_buffer_R[i]; /*Right Channel*/
+			 Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE*buffer+2*i]= Audio_buffer_1[i]; /*Left Channel*/
+			 Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE*buffer+2*i + 1]= Audio_buffer_2[i]; /*Right Channel*/
 		}
 	//}
 		// If there in an underrun, we don't read the buffer to recover
