@@ -1,9 +1,9 @@
 /**
   ******************************************************************************
   * @file    usbd_audio.c
-  * @author  JM. Fourneropn
-  * @version V0.1
-  * @date    27/08/2016
+  * @author  JM. Fourneron
+  * @version V0.2
+  * @date    12/10/2016
   * @brief   This file provides the Audio core functions with explicit Audio feedback.
   *
   * @verbatim
@@ -109,24 +109,28 @@
 #define AUDIO_PACKET_SZE(frq)          (uint8_t)(((frq * 2 * 2)/1000) & 0xFF)+4, \
                                        (uint8_t)((((frq * 2 * 2)/1000) >> 8) & 0xFF)
 
+// F0B_rate calculation with 2 levels
+#define SPK1_GAP_U2    AUDIO_TOTAL_BUF_SIZE * 6 / 8	// At half buffer up in distance	=> Speed up host a lot
+#define	SPK1_GAP_U1    AUDIO_TOTAL_BUF_SIZE * 5 / 8	// At quarter buffer up in distance => Speed up host a bit
+#define SPK1_GAP_NOM   AUDIO_TOTAL_BUF_SIZE * 4 / 8	// Ideal distance is half the size of linear buffer
+#define SPK1_GAP_L1	   AUDIO_TOTAL_BUF_SIZE * 3 / 8    // At quarter buffer down in distance => Slow down host a bit
+#define SPK1_GAP_L2	   AUDIO_TOTAL_BUF_SIZE * 2 / 8    // At half buffer down in distance => Slow down host a lot
+
 
 #define SOF_RATE 0x2
-//## static volatile uint32_t  usbd_audio_AltSet = 0;
-static volatile  uint16_t SOF_num=0;
-static volatile uint8_t flag=0;
-//static volatile uint8_t dpid;
-//volatile int32_t corr,oldgap,dgap,tmpxx;
-//volatile int32_t maxgap, mingap;
-int8_t shift = 0;
-uint8_t tmpbuf[AUDIO_OUT_PACKET*2+16] __attribute__ ((aligned(4)));
 
+static volatile  uint16_t SOF_num=0;
+//?? code the out strem Flag with SOF/Dataout
+static volatile uint8_t out_stream=0;
+
+uint8_t tmpbuf[AUDIO_OUT_PACKET*2+16] __attribute__ ((aligned(4)));
 
 volatile uint32_t feedback_data __attribute__ ((aligned(4))) = 0x0C0000; //corresponds to 48 in 10.14 fixed point format
 uint32_t accum __attribute__ ((aligned(4))) = 0x0C0000; //corresponds to 48 in 10.14 fixed point format
 uint8_t feedbacktable[3];
 
 
-// ## static uint32_t PlayFlag = 0;
+static uint8_t PlayFlag = 0;
 
 /**
   * @}
@@ -426,18 +430,17 @@ static uint8_t  USBD_AUDIO_Init (USBD_HandleTypeDef *pdev,
     haudio->rd_enable = 0;
 
     /* Initialize the Audio output Hardware layer */
-    //if (((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->Init(USBD_AUDIO_FREQ, AUDIO_DEFAULT_VOLUME, 0) != USBD_OK)
-    //{
-    //  return USBD_FAIL;
-    //}
+    if (((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->Init(USBD_AUDIO_FREQ, AUDIO_DEFAULT_VOLUME, 0) != USBD_OK)
+    {
+      return USBD_FAIL;
+    }
 
     /* Prepare Out endpoint to receive 1st packet */
     USBD_LL_PrepareReceive(pdev,
                            AUDIO_OUT_EP,
-                           tmpbuf,
+                           haudio->buffer,
                            AUDIO_OUT_PACKET+4);
   }
-  flag=1;
   return USBD_OK;
 }
 
@@ -468,8 +471,6 @@ static uint8_t  USBD_AUDIO_DeInit (USBD_HandleTypeDef *pdev,
     USBD_free(pdev->pClassData);
     pdev->pClassData = NULL;
   }
-
-  flag=0;
 
   return USBD_OK;
 }
@@ -537,11 +538,10 @@ static uint8_t  USBD_AUDIO_Setup (USBD_HandleTypeDef *pdev,
         haudio->alt_setting = (uint8_t)(req->wValue);
 	if (haudio->alt_setting == 1)
         {SOF_num=0;
-        flag=0;
         USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
         };
         if (haudio->alt_setting == 0)
-        {flag=0;
+        {
        	USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
         }
       }
@@ -589,8 +589,7 @@ static uint8_t  USBD_AUDIO_DataIn (USBD_HandleTypeDef *pdev,
 	// We control that we have the good EP: the last 7 bits, as 0x80 is the direction
 	if (epnum == (AUDIO_IN_EP&0x7f))
 	{
-	   //BSP_LED_Toggle(LED6);
-	   flag=0;
+	   // flags that the feedback was sent and resets the counter for the next send
 	   SOF_num=0;
 	}
     return USBD_OK;
@@ -648,39 +647,15 @@ static uint8_t  USBD_AUDIO_SOF (USBD_HandleTypeDef *pdev)
 	USBD_AUDIO_HandleTypeDef   *haudio;
 
 	haudio = (USBD_AUDIO_HandleTypeDef*) pdev->pClassData;
-
-	USB_OTG_GlobalTypeDef *USBx = pdev->pData;
-
-	//## Roman's code
-	//USB_OTG_DSTS_TypeDef  FS_DSTS;
-
-
-	  /* Check if there are available data in stream buffer.
-	    In this function, a single variable (PlayFlag) is used to avoid software delays.
-	    The play operation must be executed as soon as possible after the SOF detection. */
-	 /* At leading edge of SOF signal we need to capture TIM2 value into CCR1 register and reset TIM2 counter itself.
-		In the SOF interrupt handler capture flag is reset and value from TIM2 CCR1 register is accumulated to compute
-		feedback value. As according to the standard, explicit feedback value contains ratio of sample rate
-		to SOF rate and should be sent in 10.14 format, it is accumulated during 2^FEEDBACK_RATE periods.
-		To compute feedback value it should be shifted left by 6 digits
-		(due to the MCLK to sample rate 256 times ratio). */
-	//BSP_LED_Toggle(LED3);
-
+	
 	if (haudio->alt_setting==1)
 	{
-		SOF_num++;
+	// every SOF_RATE, we send the feedback data to the host
+	// Feedback value is calculated in USBD_AUDIO_Sync, when data are pulled by program
+	SOF_num++;
         if (SOF_num==(1<<SOF_RATE))
 	      {
 	        SOF_num=0;
-	        //feedbacktable[0]= 0x66;
-	        //feedbacktable[1]= 0x06;
-	        //feedbacktable[2]= 0x0C;
-	        //feedbacktable[0]= 0x00;
-	        //feedbacktable[1]= 0x00;
-	        //feedbacktable[2]= 0x0C;
-	        //feedbacktable[0]= 0x9A;
-	        //feedbacktable[1]= 0xF9;
-	        //feedbacktable[2]= 0x0B;
 	        feedbacktable[0] = feedback_data;
 	        feedbacktable[1] = feedback_data >> 8;
 	        feedbacktable[2] = feedback_data >> 16;
@@ -692,17 +667,153 @@ static uint8_t  USBD_AUDIO_SOF (USBD_HandleTypeDef *pdev)
 }
 
 /**
-  * @brief  USBD_AUDIO_Sync
-  * @param  pdev: device instance
-  * @retval status
-  * Not used in that bare Minimum exemple
+  * @brief  USBD_AUDIO_Pull_Data
+  * @param  pdev: device instance;
+  * @param  pbuf: Pointer to buffer of data to be read
+  * @param  size: Pointer to Number of data to be read (in bytes)
+  * * @retval status
   */
-void  USBD_AUDIO_Sync (USBD_HandleTypeDef *pdev, AUDIO_OffsetTypeDef offset)
+
+void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *size)
 {
-  int8_t shift = 0;
+ 
   USBD_AUDIO_HandleTypeDef   *haudio;
   haudio = (USBD_AUDIO_HandleTypeDef*) pdev->pClassData;
+  volatile uint16_t gap = 0;
 
+
+  //?? suppress Offset that does not make sense
+  //haudio->offset =  offset;
+
+  // if Data are streamed by the host, we calculate feedback
+  if (out_stream == 1) {
+	if (haudio->wr_ptr > haudio->rd_ptr)
+	{
+		gap= haudio->wr_ptr - haudio->rd_ptr;
+	} else {
+		gap = haudio->wr_ptr - haudio->rd_ptr + AUDIO_TOTAL_BUF_SIZE;
+	}
+
+	if 		(gap < SPK1_GAP_L2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
+				BSP_LED_On(LED3);
+				BSP_LED_Off(LED4);
+				BSP_LED_Off(LED5);
+				//BSP_LED_Off(LED6);
+				}
+			else if (gap < SPK1_GAP_L1) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
+				feedback_data =0x0C0666;
+				//BSP_LED_Off(LED3);
+				BSP_LED_On(LED4);
+				BSP_LED_Off(LED5);
+				//BSP_LED_Off(LED6);
+			}
+
+			else if (gap > SPK1_GAP_U2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
+				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED4);
+				BSP_LED_Off(LED5);
+				BSP_LED_On(LED6);
+			}
+			else if (gap > SPK1_GAP_U1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
+				feedback_data = 0x0BF99A;
+				//feedback_data = 0x0BE000;
+				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED4);
+				BSP_LED_On(LED5);
+				//BSP_LED_Off(LED6);
+			}
+
+			else {		// Go back to indicating feedback system on module LEDs
+				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED4);
+				BSP_LED_Off(LED5);
+				//BSP_LED_Off(LED6);
+			}
+  } else {
+	  // If not for ex in the case no more data are streamed, but we empty the buffer, then
+	  // the feedback value is set to the init value
+	  feedback_data = 0x0C0000;
+  }
+
+
+	/*if (gap < old_gap) {
+		if (gap < SPK1_GAP_L2) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
+			feedback_data += 2*FB_RATE_DELTA;
+			old_gap = gap;
+			BSP_LED_On(LED6);
+		}
+		else if (gap < SPK1_GAP_L1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
+			feedback_data += FB_RATE_DELTA;
+			old_gap = gap;
+			BSP_LED_On(LED4);
+		}
+		else {		// Go back to indicating feedback system on module LEDs
+			BSP_LED_Off(LED3);
+			BSP_LED_Off(LED4);
+			BSP_LED_Off(LED5);
+			BSP_LED_Off(LED6);
+		}
+	}
+	else if (gap > old_gap) {
+		if (gap > SPK1_GAP_U2) { 			// gap > outer upper bound => 2*FB_RATE_DELTA
+			feedback_data -= 2*FB_RATE_DELTA;
+			old_gap = gap;
+			BSP_LED_On(LED3);
+		}
+		else if (gap > SPK1_GAP_U1) { 		// gap > inner upper bound => 1*FB_RATE_DELTA
+			feedback_data -= FB_RATE_DELTA;
+			old_gap = gap;
+			BSP_LED_On(LED5);
+		}
+		else {		// Go back to indicating feedback system on module LEDs
+			BSP_LED_Off(LED3);
+			BSP_LED_Off(LED4);
+			BSP_LED_Off(LED5);
+			BSP_LED_Off(LED6);
+		}
+	}
+	else {		// Go back to indicating feedback system on module LEDs
+		BSP_LED_Off(LED3);
+		BSP_LED_Off(LED4);
+		BSP_LED_Off(LED5);
+		BSP_LED_Off(LED6);
+	}*/
+
+
+  //calculate length in buffer
+  //if enough data in the buffer then return buffer
+  //if not enougth data then stop Player
+  if (gap > AUDIO_OUTPUT_BUF_SIZE) {
+    // return a pointer to the buffer and length for Size
+    pbuf = &haudio->buffer[haudio->rd_ptr];
+    *size = AUDIO_OUTPUT_BUF_SIZE;
+	  // check the factor to the size
+    haudio->rd_ptr += AUDIO_OUTPUT_BUF_SIZE;
+    
+    if (haudio->rd_ptr == AUDIO_TOTAL_BUF_SIZE)
+    {
+      /* roll back */
+      haudio->rd_ptr = 0;
+    }
+
+  } else {
+
+	//Return a pointer buffer with Size = gap to empty the buffer
+	pbuf = &haudio->buffer[haudio->rd_ptr];
+	*size = gap;
+	// Stop streaming
+	//?? Command to go to stopping mode with last data to play
+	//?? check the command to see if it makes really sense
+	/*((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
+	      		                                                             gap,
+	      		                                                             AUDIO_CMD_STOP); */
+	PlayFlag = 0;
+	// Reset the buffer to be ready for new stream of data from the host
+	haudio->rd_ptr = 0;
+	haudio->wr_ptr = 0;
+
+  }
+  
 }
 
 /**
@@ -714,46 +825,23 @@ void  USBD_AUDIO_Sync (USBD_HandleTypeDef *pdev, AUDIO_OffsetTypeDef offset)
   */
 static uint8_t  USBD_AUDIO_IsoINIncomplete (USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
-    // ?? I don't understand that part
-	//This ISR is executed every time when IN token received with "wrong" PID. It's necessary
-    //to flush IN EP (feedback EP), get parity value from DSTS, and store this info for SOF handler.
-    //SOF handler should skip one frame with "wrong" PID and attempt a new transfer a frame later.
-
-    // I've been working on the Isoc incomplete issue... And got pretty good idea, which solved this problem.
-    // At the isoc incomplete interrupt, I mark the current pid (last bit of frame number).
-    // At the SOF interrupt, I test if current frame has the same parity, and when it's true,
-    // transmit the feedback endpoint data. This way is 100% working.
-
+    
     USB_OTG_GlobalTypeDef *USBx = pdev->pData;
     //?? Not sure that the flushing of the EP is needed
     USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
     /* EP disable, IN data in FIFO */
     USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL = (USB_OTG_DIEPCTL_EPDIS | USB_OTG_DIEPCTL_SNAK);
-    //USBx_INEP(epnum)->DIEPCTL = (USB_OTG_DIEPCTL_EPDIS | USB_OTG_DIEPCTL_SNAK);
     /* EP enable, IN data in FIFO */
     USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL |= (USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA);
-    //USBx_INEP(epnum)->DIEPCTL |= (USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA);
 
     feedbacktable[0] = feedback_data;
     feedbacktable[1] = feedback_data >> 8;
     feedbacktable[2] = feedback_data >> 16;
-    //feedbacktable[0]= 0x00;
-    //feedbacktable[1]= 0x00;
-    //feedbacktable[2]= 0x0C;
-    //feedbacktable[0]= 0x9A;
-    //feedbacktable[1]= 0xF9;
-    //feedbacktable[2]= 0x0B;
 
     USBD_LL_Transmit(pdev, AUDIO_IN_EP, (uint8_t *) &feedbacktable, 3);
 
-    //dpid = ((((USBx_DEVICE->DSTS))>>8)&((uint32_t)0x00000001));
-
     SOF_num=0;
-    /* if (flag)
-    {
-       flag=0;
-       USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
-    }; */
+
     return USBD_OK;
 }
 /**
@@ -778,8 +866,8 @@ static uint8_t  USBD_AUDIO_IsoOutIncomplete (USBD_HandleTypeDef *pdev, uint8_t e
   * in a frame data reception code in the ring buffer should take into account the length
   * of the received packet.
   */
-static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev,
-                              uint8_t epnum)
+
+static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
   USBD_AUDIO_HandleTypeDef   *haudio;
   haudio = (USBD_AUDIO_HandleTypeDef*) pdev->pClassData;
@@ -789,7 +877,6 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev,
   if (epnum == AUDIO_OUT_EP)
   {
 	  // ##Must read the number of frame read and push them to the application ring buffer
-	  // or to a buffer handled by the application as in the TI USB application ?
 	  curr_length=USBD_LL_GetRxDataSize (pdev,epnum);
 
 	  if (curr_length<AUDIO_OUT_PACKET) {
@@ -809,20 +896,11 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev,
 
 	  //?? for test purpose to correct the 388 case ?!?!
 	  //if (curr_length == 388) { curr_length = AUDIO_OUT_PACKET+4;};
-	  ((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&tmpbuf,curr_length,AUDIO_CMD_DATA_OUT);
+	  
 
-	  /*rest=AUDIO_TOTAL_BUF_SIZE-haudio->wr_ptr;
-	  //monitor sample rate conversion
-	  //?? for debug purpose for LEDS - to suppress to remove dependencies
-	  if (curr_length==AUDIO_OUT_PACKET-4) {
-		  BSP_LED_On(LED4);
-	  };
-	  if (curr_length>AUDIO_OUT_PACKET) {
-		  BSP_LED_On(LED5);
-	  };
-	  if (curr_length == AUDIO_OUT_PACKET) {
-		  BSP_LED_Toggle(LED3);
-	  };
+	  // Fill ring buffer with data receives froms USB - manages variable number of samples and 
+	  // ring buffer rounding
+	  rest=AUDIO_TOTAL_BUF_SIZE-haudio->wr_ptr;
 
 	  if (rest<curr_length)
 	           {
@@ -843,30 +921,31 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev,
 	           // Increment the Buffer pointer
 	           haudio->wr_ptr += curr_length;};
 	           }
-	           //roll it back when all buffers are full
-	  	  	   //??check if AUDIO_TOTAL_BUF_SIZE = AUDIO_OUT_PACKET * OUT_PACKET_NUM
-	           if (haudio->wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
-	        	   haudio->wr_ptr = 0; */
+	  //roll back when buffer is full is the ring buffer filling just arrived at the end of ring buffer
+	  if (haudio->wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
+	        	   haudio->wr_ptr = 0;
 
+	  
 
-	      // call back to hand over the audio out packet of one frame length
-	      // We send the normal packet length, as the haudio->buffer is the one that manages
-	      // the variable feedback rate
-	      //((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],AUDIO_OUT_PACKET,AUDIO_CMD_DATA_OUT);
+	  // Reading the ring buffer is enabled when the ring buffer reaches 1/2 buffer
+	  // Then, we set the flag that we play (rd_enable), and start the playing
+          if(haudio->rd_enable == 0)
+          {
+      		if (haudio->wr_ptr == (AUDIO_TOTAL_BUF_SIZE / 2)) haudio->rd_enable = 1;
+      		((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[0],
+      		                                                             AUDIO_OUTPUT_BUF_SIZE,
+      		                                                             AUDIO_CMD_START);
+      		//!! The size of the AUDIO_TOTAL_BUF_SIZE must be a multiple of AUDIO_OUTPUT_BUF_SIZE
+      		// in order to always be able to send a sequential buffer to the application (no ring
+      		// buffer rounding)
+      		// Move the read pointer forward of number of transmitted samples
+      		haudio->rd_enable = (haudio->rd_enable+ AUDIO_OUTPUT_BUF_SIZE)%AUDIO_TOTAL_BUF_SIZE;
 
-	      // The read pointer is moved to next frame
-	      // Check the % to se i addtiona +4 or +1 could distort the thing
-	      //haudio->rd_ptr = (haudio->rd_ptr+AUDIO_OUT_PACKET)%AUDIO_TOTAL_BUF_SIZE;
+      		PlayFlag = 1;
+    	  }
 
-
-        /* Prepare Out endpoint to receive next audio packet */
-	    //?? check why + 16 when we have allocated in AUDIO_PACKET_SZE +4 (space for 1 more sample)
-	    //?? check that &haudio->buffer is sized big enough to accommodate the +16 bytes
-
-	          USBD_LL_PrepareReceive(pdev,
-                           AUDIO_OUT_EP,
-						   (uint8_t*)tmpbuf,
-                           AUDIO_OUT_PACKET+4);
+          /* Prepare Out endpoint to receive next audio packet */
+	  USBD_LL_PrepareReceive(pdev,AUDIO_OUT_EP, (uint8_t*)tmpbuf, AUDIO_OUT_PACKET+4);
 
   }
 

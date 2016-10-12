@@ -54,8 +54,8 @@
 
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
-#define AUDIO_OUTPUT_BUFF_SIZE 512               	// Audio buffer size for each channel, in samples
-#define AUDIO_INPUT_BUFF_SIZE AUDIO_OUTPUT_BUFF_SIZE*8  // We want to work between 3/8 and 5/8 buffer
+//#define AUDIO_OUTPUT_BUFF_SIZE 512               	// Audio buffer size for each channel, in samples
+//AUDIO_TOTAL_BUF_SIZE#define AUDIO_INPUT_BUFF_SIZE AUDIO_OUTPUT_BUFF_SIZE*8  // We want to work between 3/8 and 5/8 buffer
 
 extern USBD_AUDIO_ItfTypeDef  USBD_AUDIO_fops;
 

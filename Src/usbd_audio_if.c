@@ -57,12 +57,6 @@
 // #define FB_RATE_DELTA (1<<12)
 #define FB_RATE_DELTA 64
 
-// F0B_rate calculation with 2 levels
-#define SPK1_GAP_U2    AUDIO_INPUT_BUFF_SIZE * 6 / 8	// A half buffer up in distance	=> Speed up host a lot
-#define	SPK1_GAP_U1    AUDIO_INPUT_BUFF_SIZE * 5 / 8	// A quarter buffer up in distance => Speed up host a bit
-#define SPK1_GAP_NOM   AUDIO_INPUT_BUFF_SIZE * 4 / 8	// Ideal distance is half the size of linear buffer
-#define SPK1_GAP_L1	   AUDIO_INPUT_BUFF_SIZE * 3 / 8  // A quarter buffer down in distance => Slow down host a bit
-#define SPK1_GAP_L2	   AUDIO_INPUT_BUFF_SIZE * 2 / 8  // A half buffer down in distance => Slow down host a lot
 
 /* Private function prototypes -----------------------------------------------*/
 static int8_t Audio_Init(uint32_t AudioFreq, uint32_t Volume, uint32_t options);
@@ -91,10 +85,10 @@ USBD_AUDIO_ItfTypeDef USBD_AUDIO_fops = {
 /* Private functions ---------------------------------------------------------*/
 
 /* Exported variables --------------------------------------------------------*/
-int16_t Audio_output_buffer[AUDIO_OUTPUT_BUFF_SIZE * 2];  // This represents two buffers in ping pong arrangement stereo samples
-int16_t Audio_buffer_L[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Left channel
-int16_t Audio_buffer_R[AUDIO_OUTPUT_BUFF_SIZE/2]; //one ping pong buffer, Right channel
-int16_t Audio_input_ring_buffer[AUDIO_INPUT_BUFF_SIZE]; // We want to work between 1/3 and 2/3 buffer, pulling AUDIO_OUTPUT_BUFF_SIZE at a time
+int16_t Audio_output_buffer[AUDIO_OUTPUT_BUF_SIZE * 2];  // This represents two buffers in ping pong arrangement stereo samples
+int16_t Audio_buffer_L[AUDIO_OUTPUT_BUF_SIZE/2]; //one ping pong buffer, Left channel
+int16_t Audio_buffer_R[AUDIO_OUTPUT_BUF_SIZE/2]; //one ping pong buffer, Right channel
+// int16_t Audio_input_ring_buffer[AUDIO_INPUT_BUFF_SIZE]; // We want to work between 1/3 and 2/3 buffer, pulling AUDIO_OUTPUT_BUFF_SIZE at a time
 
 //volatile static uint16_t old_gap = AUDIO_INPUT_BUFF_SIZE;
 extern uint32_t feedback_data;
@@ -335,101 +329,7 @@ void fill_buffer (int buffer) // buffer=0 for first half of the buffer buffer = 
 
 }
 
-void feedback_calculation(void)
-{
-	volatile uint16_t gap = 0;
-	gap= Audio_input_ring_buffer_end - Audio_input_ring_buffer_start;
-	if ((int16_t)gap < 0) {gap += AUDIO_INPUT_BUFF_SIZE;}
 
-	//feedbacktable[0]= 0x66;
-		        //feedbacktable[1]= 0x06;
-		        //feedbacktable[2]= 0x0C;
-		        //feedbacktable[0]= 0x00;
-		        //feedbacktable[1]= 0x00;
-		        //feedbacktable[2]= 0x0C;
-		        //feedbacktable[0]= 0x9A;
-		        //feedbacktable[1]= 0xF9;
-		        //feedbacktable[2]= 0x0B;
-
-	if 		(gap < SPK1_GAP_L2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				BSP_LED_On(LED3);
-				BSP_LED_Off(LED4);
-				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
-				}
-			else if (gap < SPK1_GAP_L1) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
-				feedback_data =0x0C0666;
-				//BSP_LED_Off(LED3);
-				BSP_LED_On(LED4);
-				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
-			}
-
-			else if (gap > SPK1_GAP_U2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				//BSP_LED_Off(LED3);
-				BSP_LED_Off(LED4);
-				BSP_LED_Off(LED5);
-				BSP_LED_On(LED6);
-			}
-			else if (gap > SPK1_GAP_U1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				feedback_data = 0x0BF99A;
-				//feedback_data = 0x0BE000;
-				//BSP_LED_Off(LED3);
-				BSP_LED_Off(LED4);
-				BSP_LED_On(LED5);
-				//BSP_LED_Off(LED6);
-			}
-
-			else {		// Go back to indicating feedback system on module LEDs
-				//BSP_LED_Off(LED3);
-				BSP_LED_Off(LED4);
-				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
-			}
-
-	/*if (gap < old_gap) {
-		if (gap < SPK1_GAP_L2) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
-			feedback_data += 2*FB_RATE_DELTA;
-			old_gap = gap;
-			BSP_LED_On(LED6);
-		}
-		else if (gap < SPK1_GAP_L1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-			feedback_data += FB_RATE_DELTA;
-			old_gap = gap;
-			BSP_LED_On(LED4);
-		}
-		else {		// Go back to indicating feedback system on module LEDs
-			BSP_LED_Off(LED3);
-			BSP_LED_Off(LED4);
-			BSP_LED_Off(LED5);
-			BSP_LED_Off(LED6);
-		}
-	}
-	else if (gap > old_gap) {
-		if (gap > SPK1_GAP_U2) { 			// gap > outer upper bound => 2*FB_RATE_DELTA
-			feedback_data -= 2*FB_RATE_DELTA;
-			old_gap = gap;
-			BSP_LED_On(LED3);
-		}
-		else if (gap > SPK1_GAP_U1) { 		// gap > inner upper bound => 1*FB_RATE_DELTA
-			feedback_data -= FB_RATE_DELTA;
-			old_gap = gap;
-			BSP_LED_On(LED5);
-		}
-		else {		// Go back to indicating feedback system on module LEDs
-			BSP_LED_Off(LED3);
-			BSP_LED_Off(LED4);
-			BSP_LED_Off(LED5);
-			BSP_LED_Off(LED6);
-		}
-	}
-	else {		// Go back to indicating feedback system on module LEDs
-		BSP_LED_Off(LED3);
-		BSP_LED_Off(LED4);
-		BSP_LED_Off(LED5);
-		BSP_LED_Off(LED6);
-	}*/
-}
 
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
