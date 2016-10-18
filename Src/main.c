@@ -61,11 +61,8 @@ static void Error_Handler(void);
 
 static void MX_TIM2_Init(void);
 
-// void fill_buffer (int buffer);
-void Audio_Preparation (void);
-
-// extern int next_buff;
 USBD_HandleTypeDef USBD_Device;
+
 /* Private functions ---------------------------------------------------------*/
 /**
   * @brief  Main program
@@ -88,9 +85,7 @@ int main(void)
 
   /* Configure the system clock to 168 MHz */
   SystemClock_Config();
-  MX_TIM2_Init();
-
-  // Roman's code - TMR2_Config(fs*mult_factor/2, RCC_Clocks.PCLK1_Frequency);
+  //MX_TIM2_Init();
 
 
   /* Configure LED3, LED4, LED5 and LED6 */
@@ -114,7 +109,7 @@ int main(void)
     /* Start Device Process */
     USBD_Start(&USBD_Device);
 
-    Audio_Preparation();
+    Audio_Loop();
 
     /* Run Application (Interrupt mode) */
     while (1)

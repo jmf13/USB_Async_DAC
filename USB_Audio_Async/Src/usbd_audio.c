@@ -118,15 +118,17 @@
 
 
 #define SOF_RATE 0x2
+#define NOMINAL_FEEDBACK 0x0C0000
 
 static volatile  uint16_t SOF_num=0;
-//?? code the out strem Flag with SOF/Dataout
 static volatile uint8_t out_stream=0;
 
 uint8_t tmpbuf[AUDIO_OUT_PACKET*2+16] __attribute__ ((aligned(4)));
 
 volatile uint32_t feedback_data __attribute__ ((aligned(4))) = 0x0C0000; //corresponds to 48 in 10.14 fixed point format
-uint32_t accum __attribute__ ((aligned(4))) = 0x0C0000; //corresponds to 48 in 10.14 fixed point format
+
+
+//uint32_t accum __attribute__ ((aligned(4))) = 0x0C0000; //corresponds to 48 in 10.14 fixed point format
 uint8_t feedbacktable[3];
 
 
@@ -663,6 +665,10 @@ static uint8_t  USBD_AUDIO_SOF (USBD_HandleTypeDef *pdev)
 	       }
 	}
 
+  // Set the flag to test is the Host is still active to 0. If set again at 1 by DataOut,
+  // then it means that the host is sending data
+  out_stream = 0;
+
   return USBD_OK;
 }
 
@@ -674,7 +680,7 @@ static uint8_t  USBD_AUDIO_SOF (USBD_HandleTypeDef *pdev)
   * * @retval status
   */
 
-void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *size)
+void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
 {
  
   USBD_AUDIO_HandleTypeDef   *haudio;
@@ -687,12 +693,10 @@ void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *s
 
   // if Data are streamed by the host, we calculate feedback
   if (out_stream == 1) {
-	if (haudio->wr_ptr > haudio->rd_ptr)
-	{
-		gap= haudio->wr_ptr - haudio->rd_ptr;
-	} else {
-		gap = haudio->wr_ptr - haudio->rd_ptr + AUDIO_TOTAL_BUF_SIZE;
-	}
+
+	gap= haudio->rd_ptr - haudio->wr_ptr;
+	  	if ((int16_t)gap < 0) {gap += AUDIO_TOTAL_BUF_SIZE;}
+
 
 	if 		(gap < SPK1_GAP_L2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
 				BSP_LED_On(LED3);
@@ -732,7 +736,7 @@ void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *s
   } else {
 	  // If not for ex in the case no more data are streamed, but we empty the buffer, then
 	  // the feedback value is set to the init value
-	  feedback_data = 0x0C0000;
+	  feedback_data = NOMINAL_FEEDBACK;
   }
 
 
@@ -785,9 +789,9 @@ void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *s
   //if not enougth data then stop Player
   if (gap > AUDIO_OUTPUT_BUF_SIZE) {
     // return a pointer to the buffer and length for Size
-    pbuf = &haudio->buffer[haudio->rd_ptr];
-    *size = AUDIO_OUTPUT_BUF_SIZE;
-	  // check the factor to the size
+    ((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
+    																			AUDIO_OUTPUT_BUF_SIZE,
+    	      		                                                            AUDIO_CMD_PLAY);
     haudio->rd_ptr += AUDIO_OUTPUT_BUF_SIZE;
     
     if (haudio->rd_ptr == AUDIO_TOTAL_BUF_SIZE)
@@ -798,17 +802,15 @@ void  USBD_AUDIO_Pull_Data (USBD_HandleTypeDef *pdev, uint8_t *pbuf, uint32_t *s
 
   } else {
 
-	//Return a pointer buffer with Size = gap to empty the buffer
-	pbuf = &haudio->buffer[haudio->rd_ptr];
-	*size = gap;
 	// Stop streaming
-	//?? Command to go to stopping mode with last data to play
-	//?? check the command to see if it makes really sense
-	/*((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
+	// Command to go to stopping mode with last data to play
+	((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
 	      		                                                             gap,
-	      		                                                             AUDIO_CMD_STOP); */
+	      		                                                             AUDIO_CMD_STOP);
 	PlayFlag = 0;
-	// Reset the buffer to be ready for new stream of data from the host
+	//Reset the buffer to be ready for new stream of data from the host
+	//!! This is the only place where wr_ptr is touched out of DataOut.
+
 	haudio->rd_ptr = 0;
 	haudio->wr_ptr = 0;
 
@@ -926,12 +928,15 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 	        	   haudio->wr_ptr = 0;
 
 	  
+	  // We receive data so the Host is active
+	  out_stream = 1;
 
 	  // Reading the ring buffer is enabled when the ring buffer reaches 1/2 buffer
 	  // Then, we set the flag that we play (rd_enable), and start the playing
           if(haudio->rd_enable == 0)
           {
-      		if (haudio->wr_ptr == (AUDIO_TOTAL_BUF_SIZE / 2)) haudio->rd_enable = 1;
+      		//?? change the test condition to gap between wr and rd pointer
+        	if (haudio->wr_ptr == (AUDIO_TOTAL_BUF_SIZE / 2)) haudio->rd_enable = 1;
       		((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[0],
       		                                                             AUDIO_OUTPUT_BUF_SIZE,
       		                                                             AUDIO_CMD_START);

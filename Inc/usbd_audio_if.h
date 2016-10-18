@@ -61,6 +61,7 @@ extern USBD_AUDIO_ItfTypeDef  USBD_AUDIO_fops;
 
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */
+void Audio_Loop (void);
 
 #endif /* __USBD_AUDIO_IF_H */
 

@@ -112,8 +112,7 @@ typedef enum
 {
   AUDIO_CMD_START = 1,
   AUDIO_CMD_PLAY,
-  AUDIO_CMD_STOP,
-  AUDIO_CMD_DATA_OUT,
+  AUDIO_CMD_STOP
 }AUDIO_CMD_TypeDef;
 
 
@@ -197,7 +196,7 @@ extern USBD_ClassTypeDef  USBD_AUDIO;
 uint8_t  USBD_AUDIO_RegisterInterface  (USBD_HandleTypeDef   *pdev, 
                                         USBD_AUDIO_ItfTypeDef *fops);
 
-void  USBD_AUDIO_Sync (USBD_HandleTypeDef *pdev, AUDIO_OffsetTypeDef offset);
+void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev);
 /**
   * @}
   */ 
