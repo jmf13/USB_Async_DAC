@@ -48,8 +48,6 @@
 
 /* Global Variables */
 USBD_HandleTypeDef USBD_Device;
-TIM_HandleTypeDef htim2;
-
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -59,9 +57,6 @@ TIM_HandleTypeDef htim2;
 static void SystemClock_Config(void);
 static void Error_Handler(void);
 
-static void MX_TIM2_Init(void);
-
-USBD_HandleTypeDef USBD_Device;
 
 /* Private functions ---------------------------------------------------------*/
 /**
@@ -85,8 +80,6 @@ int main(void)
 
   /* Configure the system clock to 168 MHz */
   SystemClock_Config();
-  //MX_TIM2_Init();
-
 
   /* Configure LED3, LED4, LED5 and LED6 */
     BSP_LED_Init(LED3);
@@ -108,19 +101,19 @@ int main(void)
 
     /* Start Device Process */
     USBD_Start(&USBD_Device);
+//## Test purpose
+#include "stm32f4_discovery_audio.h"
+    BSP_AUDIO_OUT_Init(OUTPUT_DEVICE_AUTO, AUDIO_DEFAULT_VOLUME, USBD_AUDIO_FREQ);
 
     Audio_Loop();
 
     /* Run Application (Interrupt mode) */
     while (1)
     {
-  	  // Wait as long as next_buff == 1, then fill first half
-  	  //while (next_buff == 1);
-  	  //fill_buffer (0);
-
-  	  // Wait as long as next_buff == 0, then fill second half
-  	  //while (next_buff == 0);
-  	  //fill_buffer (1);
+    	//BSP_LED_Toggle(LED3);
+    	//HAL_Delay (500);
+    	//BSP_LED_Toggle(LED4);
+    	//HAL_Delay (500);
     }
 }
 
@@ -192,118 +185,6 @@ static void SystemClock_Config(void)
     __HAL_FLASH_PREFETCH_BUFFER_ENABLE();
   }
 }
-
-
-//timer2 is clocked via the MCLK frequency and captures its counter value by SOF event
-void MX_TIM2_Init(void)
-{
-    //TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
-    //TIM_ICInitTypeDef TIM_ICInitStructure;
-    //TIM_OCInitTypeDef TIM_OCInitStructure;
-    TIM_ClockConfigTypeDef sClockSourceConfig;
-    TIM_SlaveConfigTypeDef sSlaveConfig;
-    TIM_MasterConfigTypeDef sMasterConfig;
-    TIM_IC_InitTypeDef sConfigIC;
-
-    //GPIO_InitTypeDef GPIO_InitStructure;
-
-    // TIM2_CH1_ETR pin (PA.15) configuration
-    // => defined now in stm32f4xx_hal_msp.c
-    //GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
-    //GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
-    //GPIO_Init(GPIOA, &GPIO_InitStructure);
-    //GPIO_PinAFConfig(GPIOA, GPIO_PinSource15, GPIO_AF_TIM2);
-
-    /* Enable the TIM2 clock */
-
-    //OK
-    htim2.Instance = TIM2;
-    //OK
-    htim2.Init.Prescaler = 0;
-    //OK
-    htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-    //Seems OK initial MX value was 0 => as in Roman's code
-    htim2.Init.Period = 0xffffffff;
-    //OK
-    htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    //OK
-    if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    //clock TIM2 via ETR pin
-    //TIM_ETRClockMode2Config(TIM2, TIM_ExtTRGPSC_OFF, TIM_ExtTRGPolarity_NonInverted, 0);
-
-    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
-    sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
-    sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
-    sClockSourceConfig.ClockFilter = 0;
-    if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    if (HAL_TIM_IC_Init(&htim2) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    /* TIM2 input trigger selection */
-    /* It is necessary for the coming of SOF signal to capture the value of the timer 2 counter capture register, and the timer counter 2 - fold
-         The processing procedure SOF'a capture the flag is cleared, and the value is stored, in order to give the value of feedback rate
-         Since the system has three independent clock source - generator MCLK, USB SOF rate from host and HSE PLL,
-         timer 2 is clocked by the frequency of MCLK = 12288 kHz. Takm way between SOFami
-         Timer 2 should total approximately 12200-12400. This value must fall in the capture register 2. Since the timer according to standard
-         value feedback value should be issued in the format ratio of 10.14 and contain fs / fsof, and accumulation is 2 ^ SOF_VALUE periods
-         we obtain for the period SOF - 12288 Pulse
-         6 need to shift bits to the left to obtain feedback_value
-     */
-
-
-        // Programmable TMR2 to capture USB frame period
-        //TIM_RemapConfig(TIM2,TIM2_USBFS_SOF);
-        //TIM_SelectInputTrigger(TIM2, TIM_TS_ITR1);
-        //TIM_SelectSlaveMode(TIM2,TIM_SlaveMode_Reset);
-
-
-      sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-      sSlaveConfig.InputTrigger = TIM_TS_ITR1;
-      if (HAL_TIM_SlaveConfigSynchronization(&htim2, &sSlaveConfig) != HAL_OK)
-      {
-        Error_Handler();
-      }
-
-      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-      if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-      {
-        Error_Handler();
-      }
-
-      if (HAL_TIMEx_RemapConfig(&htim2, TIM_TIM2_USBFS_SOF) != HAL_OK)
-      {
-        Error_Handler();
-      }
-      /* Enable capture*/
-      //TIM_ICInitStructure.TIM_Channel = TIM_Channel_1;
-      //TIM_ICInitStructure.TIM_ICPolarity = TIM_ICPolarity_Rising;
-      //TIM_ICInitStructure.TIM_ICSelection = TIM_ICSelection_TRC;
-      //TIM_ICInitStructure.TIM_ICPrescaler = TIM_ICPSC_DIV1;
-      //TIM_ICInitStructure.TIM_ICFilter = 0;
-      //TIM_ICInit(TIM2, &TIM_ICInitStructure);
-      sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-      sConfigIC.ICSelection = TIM_ICSELECTION_TRC;
-      sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-      sConfigIC.ICFilter = 0;
-      if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
-      {
-        Error_Handler();
-      }
-
-    //## TIM_Cmd(TIM2, ENABLE);
-}
-
 
 /**
   * @brief  This function is executed in case of error occurrence.

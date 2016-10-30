@@ -58,6 +58,13 @@ typedef enum
   PLAYER_STOPPED
 }PLAYER_STATE_TypeDef;
 
+typedef enum
+{
+	NEXT_BUFFER_0 = 0,
+	NEXT_BUFFER_1,
+	NEXT_BUFFER_NO
+}NEXT_BUFFER_TypeDef;
+
 /* Private define ------------------------------------------------------------*/
 
 /* Private macro -------------------------------------------------------------*/
@@ -90,7 +97,7 @@ USBD_AUDIO_ItfTypeDef USBD_AUDIO_fops = {
 };
 
 // State of the player
-PLAYER_STATE_TypeDef player_state;
+volatile PLAYER_STATE_TypeDef player_state = PLAYER_STOPPED;
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -116,14 +123,14 @@ extern USBD_HandleTypeDef USBD_Device;
 // variables to keep as global variables the information about the buffer 
 // pulled from the usbd_audio
 
-uint8_t* pbuf_input;
-uint32_t buf_input_size;
+volatile uint8_t* pbuf_input;
+volatile uint32_t buf_input_size;
 
 // Size of the output buffer
-uint32_t Audio_output_buffer_size =0;
+volatile uint32_t Audio_output_buffer_size =0;
 
 //variable for next output buffer to write - 2 means no buffer to fill (wait state)
-int volatile next_buff = 2; 
+volatile NEXT_BUFFER_TypeDef next_buff = NEXT_BUFFER_NO;
 
 // Endless loop that fills the buffers when needed
 // this procedure is called by main() once initialization is finished
@@ -134,15 +141,17 @@ void Audio_Loop (void)
 
 	  switch(next_buff) {
   
-  	    case 0:
-	      fill_buffer (0, pbuf_input, buf_input_size);
+  	    case NEXT_BUFFER_0:
+  	      fill_buffer (0, pbuf_input, buf_input_size);
+	      next_buff = NEXT_BUFFER_NO;
 	      break;
 
-	    case 1:
+	    case NEXT_BUFFER_1:
 	      fill_buffer (1, pbuf_input, buf_input_size);
+	      next_buff = NEXT_BUFFER_NO;
 	      break;
     
-	    case 2:
+	    case NEXT_BUFFER_NO:
 	      // do nothing
 	      break;
   	  }
@@ -158,8 +167,8 @@ void Audio_Loop (void)
   */
 static int8_t Audio_Init(uint32_t  AudioFreq, uint32_t Volume, uint32_t options)
 {
-
-  BSP_AUDIO_OUT_Init(OUTPUT_DEVICE_AUTO, AUDIO_DEFAULT_VOLUME, USBD_AUDIO_FREQ);
+//?? Test purpose
+  //BSP_AUDIO_OUT_Init(OUTPUT_DEVICE_AUTO, AUDIO_DEFAULT_VOLUME, USBD_AUDIO_FREQ);
 
   return 0;
 }
@@ -171,7 +180,9 @@ static int8_t Audio_Init(uint32_t  AudioFreq, uint32_t Volume, uint32_t options)
   */
 static int8_t Audio_DeInit(uint32_t options)
 {
-  BSP_AUDIO_OUT_Stop(CODEC_PDWN_SW);
+	BSP_AUDIO_OUT_SetMute(AUDIO_MUTE_ON);
+	BSP_AUDIO_OUT_Stop(CODEC_PDWN_SW);
+	BSP_AUDIO_OUT_SetMute(AUDIO_MUTE_OFF);
   return 0;
 }
 
@@ -192,29 +203,42 @@ static int8_t Audio_PlaybackCmd(uint8_t *pbuf, uint32_t size, uint8_t cmd)
   //Called by usbd_audio when the input buffer is ready, to start the music playing
   case AUDIO_CMD_START:
 	    // init filters
+	    //##BSP_LED_Toggle (LED3);
 	  	initFilter();
 
 		// fills first half of the output buffer with zeros, playing will start with half buffer of zeros
 		for(i=0; i<AUDIO_OUTPUT_BUF_SIZE; i++){
 			 Audio_output_buffer[i]= 0;
 		}
-		
-
-	  	// fill second half of the audio_output_buffer, first half will start with 0000s
-	  	fill_buffer (1, pbuf, size);
 
 	  	// Size in bytes, for a complete buffer
-	  	BSP_AUDIO_OUT_Play((uint16_t *)&Audio_output_buffer, AUDIO_OUTPUT_BUF_SIZE*2);
-		// we then wait for a DMA event of DMA half transferred 
-	  	next_buff = 2;
+		BSP_AUDIO_OUT_SetMute(AUDIO_MUTE_OFF);
+	  	BSP_AUDIO_OUT_Play((uint16_t *)&Audio_output_buffer, AUDIO_OUTPUT_BUF_SIZE*4);
+		// we then wait for a DMA event of DMA half transferred
+	  	// fill second half of the audio_output_buffer, first half will start with 0000s
+	  	//Pull_Data from USBD_Audio - note that data are provided by USBD_Audio using the Audio_PlaybackCmd callback
+	    Audio_output_buffer_size = 0;
+
+	    USBD_AUDIO_DataPull (&USBD_Device);
+	    next_buff = NEXT_BUFFER_1;
+	  	player_state = PLAYER_STARTED;
     break;
 
 
-  // called by USBD_Audio in the pull_data callback => we save the infor srelated to the buffer ready: pointer and size 
+  // called by USBD_Audio in the pull_data callback => we save the infos related to the buffer ready: pointer and size
   case AUDIO_CMD_PLAY:
     pbuf_input = pbuf;
-    buf_input_size = size;
+    buf_input_size = size/2;
+    //##BSP_LED_Toggle (LED6);
     break;
+
+  case AUDIO_CMD_STOP:
+      pbuf_input = pbuf;
+      buf_input_size = size/2;
+      player_state = PLAYER_STOPPING;
+      //##BSP_LED_Toggle (LED5);
+      break;
+
 
   }
   return 0;
@@ -275,27 +299,30 @@ void BSP_AUDIO_OUT_TransferComplete_CallBack(void)
  switch(player_state)
   {
     case PLAYER_STARTED:
-	//start playing the prepared buffer
-	//?? make sure that Audio_output_buffer_size is well calculated
-	BSP_AUDIO_OUT_ChangeBuffer((uint16_t *) &Audio_output_buffer,  AUDIO_OUTPUT_BUF_SIZE*2);
-	//Pull_Data from USBD_Audio - note that data are provided by USBD_Audio using the Audio_PlaybackCmd callback
-	USBD_AUDIO_DataPull (&USBD_Device);	
-	next_buff = 1;  
+	  //start playing the prepared buffer
+	  BSP_AUDIO_OUT_ChangeBuffer((uint16_t *) &Audio_output_buffer,  AUDIO_OUTPUT_BUF_SIZE*2);
+
+	  //Pull_Data from USBD_Audio - note that data are provided by USBD_Audio using the Audio_PlaybackCmd callback
+	  USBD_AUDIO_DataPull (&USBD_Device);
+	  next_buff = NEXT_BUFFER_1;
+	  Audio_output_buffer_size = 0;
       break;
-    //?? See how to fill buffer with zeors to complement the incomplete buffer
+    //?? See how to fill buffer with zeros to complement the incomplete buffer
     case PLAYER_STOPPING:
         //Start playing the prepared buffer before being stopped
-	BSP_AUDIO_OUT_ChangeBuffer((uint16_t *) &Audio_output_buffer, Audio_output_buffer_size);
-	
-	//we don't pull data, set next_buffer to no filling, and stop the player
-	next_buff = 2;
+	    BSP_AUDIO_OUT_ChangeBuffer((uint16_t *) &Audio_output_buffer, Audio_output_buffer_size);
+	    Audio_output_buffer_size = 0;
+	    //we don't pull data, set next_buffer to no filling, and stop the player
+	    next_buff = NEXT_BUFFER_NO;
 
-	//?? See how to fill buffer with zeors to complement the incomplete buffer
-	player_state = PLAYER_STOPPED;
-      break;
+	    //?? See how to fill buffer with zeros to complement the incomplete buffer
+	    player_state = PLAYER_STOPPED;
+	    BSP_LED_On(LED6);
+        break;
 
     case PLAYER_STOPPED:
-      // We do nothing
+    	BSP_AUDIO_OUT_SetMute(AUDIO_MUTE_ON);
+    	BSP_LED_On(LED6);
       break;
    }
 }
@@ -312,63 +339,60 @@ switch(player_state)
     case PLAYER_STARTED:
 	//Pull_Data from USBD_Audio - note that data are provided by USBD_Audio using the Audio_PlaybackCmd callback
 	USBD_AUDIO_DataPull (&USBD_Device);
-	next_buff = 0;	  
+	next_buff = NEXT_BUFFER_0;
       break;
 
     case PLAYER_STOPPING:
-      // We do nothing
+    	// We do nothing
       break;
 
     case PLAYER_STOPPED:
       // We do nothing
       break;
    }
-	
 }
 
-//?? Adapt to use pbuf and size parameters
+//size in in int_16
 void fill_buffer (int buffer, uint8_t *pbuf, uint32_t size) // buffer=0 for first half of the buffer buffer = 1 for second half
 {
-	uint16_t i = 0;
+	int i=0;
+	// This is needed to translate the bytes buffer from usbd_audio in int_16 music data
+	uint16_t * pbuf_uint16 = (uint16_t *)pbuf;
 
-	// If there in no underrun: ie the ring buffer has more than the needed samples to fill the next AUDIO_OUTPUT_BUFFER
-	// then we prepare the next buffer
+	   // The size is in bytes, we need to read 2xInt16 at each loop exec
+	   // So the loop has to be performed on size/2
+	   for(i=0; i<size/2; i++){
+			Audio_buffer_L[i]= *pbuf_uint16++;
+			Audio_buffer_R[i]= *pbuf_uint16++;
 
-	//?? issue with Audio_input_ring_buffer_length which is not interrupt free +> attempt without, relying on the
-	// Asynch feature
-	//if (Audio_input_ring_buffer_length > AUDIO_OUTPUT_BUFF_SIZE){
-		for(i=0; i<AUDIO_OUTPUT_BUF_SIZE/2; i++){
-			Audio_buffer_L[i]= pbuf[i];
-			Audio_buffer_R[i]= pbuf[i+1];
 		}
 
 		//if user button pressed, we apply the DSP
 		//## add the init of the pushbutton
-		if (BSP_PB_GetState(BUTTON_KEY)== 1) {
+		/*if (BSP_PB_GetState(BUTTON_KEY)== 1) {
 				BSP_LED_On(LED3);
-				dsp((int16_t*)&Audio_buffer_L[0], AUDIO_OUTPUT_BUF_SIZE/2, 0);
-				dsp((int16_t*)&Audio_buffer_R[0], AUDIO_OUTPUT_BUF_SIZE/2, 1);
+				dsp((int16_t*)&Audio_buffer_L[0], size/2, 0);
+				dsp((int16_t*)&Audio_buffer_R[0], size/2, 1);
 		} else {
 			BSP_LED_Off(LED3);
-		}
-
+		}*/
 		// Build stereo Audio_output_buffer from Audio_buffer_L and Audio_buffer_R, filling the requested
 		// ping pong buffer: first half offset 0 or second half offset AUDIO_OUTPUT_BUFF_SIZE
-		for(i=0; i<AUDIO_OUTPUT_BUF_SIZE/2; i++){
+
+	   for(i=0; i<size/2; i++){
 			 Audio_output_buffer[AUDIO_OUTPUT_BUF_SIZE*buffer+2*i]= Audio_buffer_L[i]; /*Left Channel*/
 			 Audio_output_buffer[AUDIO_OUTPUT_BUF_SIZE*buffer+2*i + 1]= Audio_buffer_R[i]; /*Right Channel*/
 		}
 
+		// if the buffer to fill is the 2nd half and it is an incomplete buffer
+		// then we have to fill with zeros as the playback has already started and is difficult to stop
+		if ((buffer==1)&&(size < AUDIO_OUTPUT_BUF_SIZE )){
+			for(i=size; i<AUDIO_OUTPUT_BUF_SIZE; i++){
+				Audio_output_buffer[AUDIO_OUTPUT_BUF_SIZE*buffer+i]= 0;
+					    }
+		}
+
 		Audio_output_buffer_size = Audio_output_buffer_size + size;
-	//}
-		// If there in an underrun, we don't read the buffer to recover
-	//else {
-		// We toggle LED3 to signal the error
-		// We increment the underrun counter
-		// The previous data will be used and create a glitch
-		//BSP_LED_Toggle(LED3);
-		//Underrun = Underrun + 1;
-	//}
 
 }
 

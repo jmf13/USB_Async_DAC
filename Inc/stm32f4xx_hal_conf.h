@@ -149,7 +149,7 @@
   * @brief This is the HAL system configuration section
   */     
 #define  VDD_VALUE                    ((uint32_t)3300) /*!< Value of VDD in mv */
-#define  TICK_INT_PRIORITY            ((uint32_t)0x0F) /*!< tick interrupt priority */
+#define  TICK_INT_PRIORITY            ((uint32_t)0x00) /*!< tick interrupt priority */
 #define  USE_RTOS                     0
 #define  PREFETCH_ENABLE              0 /* The prefetch will be enabled in SystemClock_Config(), depending on the used 
                                            STM32F405/415/07/417 device: RevA (prefetch must be off) or RevZ (prefetch can be on/off) */

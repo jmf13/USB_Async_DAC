@@ -117,7 +117,7 @@
 #define SPK1_GAP_L2	   AUDIO_TOTAL_BUF_SIZE * 2 / 8    // At half buffer down in distance => Slow down host a lot
 
 
-#define SOF_RATE 0x2
+#define SOF_RATE 0x08
 #define NOMINAL_FEEDBACK 0x0C0000
 
 static volatile  uint16_t SOF_num=0;
@@ -593,7 +593,9 @@ static uint8_t  USBD_AUDIO_DataIn (USBD_HandleTypeDef *pdev,
 	{
 	   // flags that the feedback was sent and resets the counter for the next send
 	   SOF_num=0;
+
 	}
+	//BSP_LED_Toggle(LED4);
     return USBD_OK;
 }
 
@@ -654,14 +656,19 @@ static uint8_t  USBD_AUDIO_SOF (USBD_HandleTypeDef *pdev)
 	{
 	// every SOF_RATE, we send the feedback data to the host
 	// Feedback value is calculated in USBD_AUDIO_Sync, when data are pulled by program
+
+	//?? Test purpose
+	//??BSP_LED_Toggle(LED3);
 	SOF_num++;
         if (SOF_num==(1<<SOF_RATE))
 	      {
-	        SOF_num=0;
-	        feedbacktable[0] = feedback_data;
-	        feedbacktable[1] = feedback_data >> 8;
-	        feedbacktable[2] = feedback_data >> 16;
-	        USBD_LL_Transmit(pdev, AUDIO_IN_EP, (uint8_t *) &feedbacktable, 3);
+	       SOF_num=0;
+	       //?? Test purpose
+	       //feedback_data = NOMINAL_FEEDBACK;
+	       feedbacktable[0] = feedback_data;
+	       feedbacktable[1] = feedback_data >> 8;
+	       feedbacktable[2] = feedback_data >> 16;
+	       USBD_LL_Transmit(pdev, AUDIO_IN_EP, (uint8_t *) &feedbacktable, 3);
 	       }
 	}
 
@@ -687,33 +694,32 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
   haudio = (USBD_AUDIO_HandleTypeDef*) pdev->pClassData;
   volatile uint16_t gap = 0;
 
-
   //?? suppress Offset that does not make sense
   //haudio->offset =  offset;
 
+  gap= (haudio->wr_ptr - haudio->rd_ptr)/2;  //divide by 2 to have the gap in 16 bit samples
+  	  	if ((int16_t)gap < 0) {gap += AUDIO_TOTAL_BUF_SIZE;}
+
   // if Data are streamed by the host, we calculate feedback
-  if (out_stream == 1) {
-
-	gap= haudio->rd_ptr - haudio->wr_ptr;
-	  	if ((int16_t)gap < 0) {gap += AUDIO_TOTAL_BUF_SIZE;}
-
+  //?? for test purpose - do not use the out_stream criteria
+  	  	//  if (out_stream == 1) {
 
 	if 		(gap < SPK1_GAP_L2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
 				BSP_LED_On(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
+				BSP_LED_Off(LED6);
 				}
 			else if (gap < SPK1_GAP_L1) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
 				feedback_data =0x0C0666;
-				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED3);
 				BSP_LED_On(LED4);
 				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
+				BSP_LED_Off(LED6);
 			}
 
 			else if (gap > SPK1_GAP_U2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_Off(LED5);
 				BSP_LED_On(LED6);
@@ -721,23 +727,23 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
 			else if (gap > SPK1_GAP_U1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
 				feedback_data = 0x0BF99A;
 				//feedback_data = 0x0BE000;
-				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_On(LED5);
-				//BSP_LED_Off(LED6);
+				BSP_LED_Off(LED6);
 			}
 
 			else {		// Go back to indicating feedback system on module LEDs
-				//BSP_LED_Off(LED3);
+				BSP_LED_Off(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_Off(LED5);
-				//BSP_LED_Off(LED6);
+				BSP_LED_Off(LED6);
 			}
-  } else {
+//  } else {
 	  // If not for ex in the case no more data are streamed, but we empty the buffer, then
 	  // the feedback value is set to the init value
-	  feedback_data = NOMINAL_FEEDBACK;
-  }
+//	  feedback_data = NOMINAL_FEEDBACK;
+//  }
 
 
 	/*if (gap < old_gap) {
@@ -785,16 +791,18 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
 
 
   //calculate length in buffer
-  //if enough data in the buffer then return buffer
+  //if more data than the buffer size then return buffer
   //if not enougth data then stop Player
   if (gap > AUDIO_OUTPUT_BUF_SIZE) {
     // return a pointer to the buffer and length for Size
+	  //??
+
     ((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
-    																			AUDIO_OUTPUT_BUF_SIZE,
+    																			AUDIO_OUTPUT_BUF_SIZE*2,
     	      		                                                            AUDIO_CMD_PLAY);
-    haudio->rd_ptr += AUDIO_OUTPUT_BUF_SIZE;
+    haudio->rd_ptr += AUDIO_OUTPUT_BUF_SIZE*2;
     
-    if (haudio->rd_ptr == AUDIO_TOTAL_BUF_SIZE)
+    if (haudio->rd_ptr == AUDIO_TOTAL_BUF_SIZE*2)
     {
       /* roll back */
       haudio->rd_ptr = 0;
@@ -805,7 +813,7 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
 	// Stop streaming
 	// Command to go to stopping mode with last data to play
 	((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[haudio->rd_ptr],
-	      		                                                             gap,
+	      		                                                             gap*2,
 	      		                                                             AUDIO_CMD_STOP);
 	PlayFlag = 0;
 	//Reset the buffer to be ready for new stream of data from the host
@@ -813,6 +821,8 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
 
 	haudio->rd_ptr = 0;
 	haudio->wr_ptr = 0;
+	haudio->rd_enable = 0;
+	//BSP_LED_On(LED3);
 
   }
   
@@ -827,8 +837,11 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
   */
 static uint8_t  USBD_AUDIO_IsoINIncomplete (USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
-    
-    USB_OTG_GlobalTypeDef *USBx = pdev->pData;
+    //?? test
+	PCD_HandleTypeDef *hpcd = (PCD_HandleTypeDef *)pdev->pData;
+	USB_OTG_GlobalTypeDef *USBx = hpcd->Instance;
+    //?? initial attempt
+	//USB_OTG_GlobalTypeDef *USBx = pdev->pData;
     //?? Not sure that the flushing of the EP is needed
     USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
     /* EP disable, IN data in FIFO */
@@ -836,13 +849,18 @@ static uint8_t  USBD_AUDIO_IsoINIncomplete (USBD_HandleTypeDef *pdev, uint8_t ep
     /* EP enable, IN data in FIFO */
     USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL |= (USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA);
 
+    //??Test purpose
+    feedback_data = NOMINAL_FEEDBACK;
     feedbacktable[0] = feedback_data;
     feedbacktable[1] = feedback_data >> 8;
     feedbacktable[2] = feedback_data >> 16;
 
+    //?? For test purpose, not to retransmit the feedback
     USBD_LL_Transmit(pdev, AUDIO_IN_EP, (uint8_t *) &feedbacktable, 3);
 
     SOF_num=0;
+    //?? Test
+    //BSP_LED_Toggle(LED6);
 
     return USBD_OK;
 }
@@ -882,13 +900,13 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 	  curr_length=USBD_LL_GetRxDataSize (pdev,epnum);
 
 	  if (curr_length<AUDIO_OUT_PACKET) {
-	 		  //BSP_LED_On(LED4);
+	 		  BSP_LED_On(LED4);
 	 	  };
 	  if (curr_length==AUDIO_OUT_PACKET+4) {
-	 		  //BSP_LED_On(LED5);
+	 		  BSP_LED_On(LED5);
 	 	  };
 	  if (curr_length > AUDIO_OUT_PACKET+4) {
-		  //BSP_LED_On(LED5);
+		  BSP_LED_On(LED6);
 	 	  };
 
 	  if (curr_length == AUDIO_OUT_PACKET) {
@@ -902,7 +920,7 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 
 	  // Fill ring buffer with data receives froms USB - manages variable number of samples and 
 	  // ring buffer rounding
-	  rest=AUDIO_TOTAL_BUF_SIZE-haudio->wr_ptr;
+	  rest=AUDIO_TOTAL_BUF_SIZE*2-haudio->wr_ptr;
 
 	  if (rest<curr_length)
 	           {
@@ -924,7 +942,7 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 	           haudio->wr_ptr += curr_length;};
 	           }
 	  //roll back when buffer is full is the ring buffer filling just arrived at the end of ring buffer
-	  if (haudio->wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
+	  if (haudio->wr_ptr >= AUDIO_TOTAL_BUF_SIZE*2)
 	        	   haudio->wr_ptr = 0;
 
 	  
@@ -936,17 +954,19 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
           if(haudio->rd_enable == 0)
           {
       		//?? change the test condition to gap between wr and rd pointer
-        	if (haudio->wr_ptr == (AUDIO_TOTAL_BUF_SIZE / 2)) haudio->rd_enable = 1;
-      		((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[0],
-      		                                                             AUDIO_OUTPUT_BUF_SIZE,
-      		                                                             AUDIO_CMD_START);
-      		//!! The size of the AUDIO_TOTAL_BUF_SIZE must be a multiple of AUDIO_OUTPUT_BUF_SIZE
-      		// in order to always be able to send a sequential buffer to the application (no ring
-      		// buffer rounding)
-      		// Move the read pointer forward of number of transmitted samples
-      		haudio->rd_enable = (haudio->rd_enable+ AUDIO_OUTPUT_BUF_SIZE)%AUDIO_TOTAL_BUF_SIZE;
-
-      		PlayFlag = 1;
+        	if (haudio->wr_ptr > (AUDIO_TOTAL_BUF_SIZE)){
+        		haudio->rd_enable = 1;
+        		((USBD_AUDIO_ItfTypeDef *)pdev->pUserData)->AudioCmd(&haudio->buffer[0],
+        		      		                                                             AUDIO_OUTPUT_BUF_SIZE*2,
+        		      		                                                             AUDIO_CMD_START);
+        		//!! The size of the AUDIO_TOTAL_BUF_SIZE must be a multiple of AUDIO_OUTPUT_BUF_SIZE
+        		// in order to always be able to send a sequential buffer to the application (no ring
+        		// buffer rounding)
+        		// Move the read pointer forward of number of transmitted samples
+        		haudio->rd_ptr = (haudio->rd_ptr+ AUDIO_OUTPUT_BUF_SIZE*2)%(AUDIO_TOTAL_BUF_SIZE*2);
+        		PlayFlag = 1;
+        		//??BSP_LED_Off(LED3);
+        	}
     	  }
 
           /* Prepare Out endpoint to receive next audio packet */
