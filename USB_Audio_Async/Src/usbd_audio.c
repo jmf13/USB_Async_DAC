@@ -117,7 +117,7 @@
 #define SPK1_GAP_L2	   AUDIO_TOTAL_BUF_SIZE * 2 / 8    // At half buffer down in distance => Slow down host a lot
 
 
-#define SOF_RATE 0x08
+#define SOF_RATE 0x04
 #define NOMINAL_FEEDBACK 0x0C0000
 
 static volatile  uint16_t SOF_num=0;
@@ -595,7 +595,7 @@ static uint8_t  USBD_AUDIO_DataIn (USBD_HandleTypeDef *pdev,
 	   SOF_num=0;
 
 	}
-	//BSP_LED_Toggle(LED4);
+	BSP_LED_Toggle(LED3);
     return USBD_OK;
 }
 
@@ -705,32 +705,32 @@ void  USBD_AUDIO_DataPull (USBD_HandleTypeDef *pdev)
   	  	//  if (out_stream == 1) {
 
 	if 		(gap < SPK1_GAP_L2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				BSP_LED_On(LED3);
+				//BSP_LED_On(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_Off(LED5);
-				BSP_LED_Off(LED6);
+				//BSP_LED_Off(LED6);
 				}
 			else if (gap < SPK1_GAP_L1) { 			// gap < outer lower bound => 2*FB_RATE_DELTA
 				feedback_data =0x0C0666;
-				BSP_LED_Off(LED3);
+				//BSP_LED_Off(LED3);
 				BSP_LED_On(LED4);
 				BSP_LED_Off(LED5);
-				BSP_LED_Off(LED6);
+				//BSP_LED_Off(LED6);
 			}
 
 			else if (gap > SPK1_GAP_U2) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
-				BSP_LED_Off(LED3);
+				//BSP_LED_Off(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_Off(LED5);
-				BSP_LED_On(LED6);
+				//BSP_LED_On(LED6);
 			}
 			else if (gap > SPK1_GAP_U1) { 		// gap < inner lower bound => 1*FB_RATE_DELTA
 				feedback_data = 0x0BF99A;
 				//feedback_data = 0x0BE000;
-				BSP_LED_Off(LED3);
+				//BSP_LED_Off(LED3);
 				BSP_LED_Off(LED4);
 				BSP_LED_On(LED5);
-				BSP_LED_Off(LED6);
+				//BSP_LED_Off(LED6);
 			}
 
 			else {		// Go back to indicating feedback system on module LEDs
@@ -845,12 +845,13 @@ static uint8_t  USBD_AUDIO_IsoINIncomplete (USBD_HandleTypeDef *pdev, uint8_t ep
     //?? Not sure that the flushing of the EP is needed
     USBD_LL_FlushEP(pdev,AUDIO_IN_EP);
     /* EP disable, IN data in FIFO */
-    USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL = (USB_OTG_DIEPCTL_EPDIS | USB_OTG_DIEPCTL_SNAK);
+    //??
+    //USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL = (USB_OTG_DIEPCTL_EPDIS | USB_OTG_DIEPCTL_SNAK);
     /* EP enable, IN data in FIFO */
-    USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL |= (USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA);
+    //??
+    //USBx_INEP(AUDIO_IN_EP&0x7f)->DIEPCTL |= (USB_OTG_DIEPCTL_CNAK | USB_OTG_DIEPCTL_EPENA);
 
     //??Test purpose
-    feedback_data = NOMINAL_FEEDBACK;
     feedbacktable[0] = feedback_data;
     feedbacktable[1] = feedback_data >> 8;
     feedbacktable[2] = feedback_data >> 16;
@@ -860,7 +861,7 @@ static uint8_t  USBD_AUDIO_IsoINIncomplete (USBD_HandleTypeDef *pdev, uint8_t ep
 
     SOF_num=0;
     //?? Test
-    //BSP_LED_Toggle(LED6);
+    BSP_LED_Toggle(LED6);
 
     return USBD_OK;
 }
@@ -899,20 +900,20 @@ static uint8_t  USBD_AUDIO_DataOut (USBD_HandleTypeDef *pdev, uint8_t epnum)
 	  // ##Must read the number of frame read and push them to the application ring buffer
 	  curr_length=USBD_LL_GetRxDataSize (pdev,epnum);
 
-	  if (curr_length<AUDIO_OUT_PACKET) {
-	 		  BSP_LED_On(LED4);
+	  /*if (curr_length<AUDIO_OUT_PACKET) {
+	 		  BSP_LED_On(LED3);
 	 	  };
 	  if (curr_length==AUDIO_OUT_PACKET+4) {
-	 		  BSP_LED_On(LED5);
+	 		  BSP_LED_On(LED6);
 	 	  };
 	  if (curr_length > AUDIO_OUT_PACKET+4) {
 		  BSP_LED_On(LED6);
 	 	  };
 
 	  if (curr_length == AUDIO_OUT_PACKET) {
-		  	  //BSP_LED_Off(LED4);
-		  	  //BSP_LED_Off(LED5);
-	  	 	  };
+		  	  BSP_LED_Off(LED3);
+		  	  BSP_LED_Off(LED6);
+	  	 	  }; */
 
 	  //?? for test purpose to correct the 388 case ?!?!
 	  //if (curr_length == 388) { curr_length = AUDIO_OUT_PACKET+4;};
